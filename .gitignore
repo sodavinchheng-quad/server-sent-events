@@ -1,0 +1,29 @@
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore virtual environments
+venv/
+.env/
+
+# Ignore IDE/editor configuration files
+.idea/
+.vscode/
+
+# Ignore system-specific files (macOS, Windows)
+.DS_Store
+Thumbs.db
+
+# Ignore npm/yarn dependencies for frontend (if applicable)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Ignore build or dist directories
+dist/
+build/
+
+# Ignore logs and temporary files
+*.log
+*.tmp

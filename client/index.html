@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat App</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <h1>Chat Room</h1>
+    <div id="connection-status" class="disconnected">Disconnected</div>
+
+    <!-- Section for entering username -->
+    <div id="username-section">
+      <h3>Enter Your Username</h3>
+      <form id="username-form" onsubmit="connectToChat(event)">
+        <input
+          type="text"
+          id="username"
+          placeholder="Enter your username"
+          required
+          autocomplete="off"
+        />
+        <button type="submit">Join Chat</button>
+      </form>
+    </div>
+
+    <!-- Section for sending messages -->
+    <div id="message-section" style="display: none">
+      <h3>Welcome to the chat, <span id="username-display"></span></h3>
+      <div id="chat-box"></div>
+      <form id="message-form" onsubmit="sendMessage(event)">
+        <input
+          type="text"
+          id="message"
+          placeholder="Type a message"
+          required
+          autocomplete="off"
+        />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

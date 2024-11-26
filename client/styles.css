@@ -1,0 +1,115 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+h1 {
+  text-align: center;
+  color: #4caf50;
+}
+
+#connection-status {
+  margin: 10px 0;
+  padding: 10px;
+  font-weight: bold;
+  text-align: center;
+  border-radius: 5px;
+}
+
+.connected {
+  background-color: #4caf50; /* Green */
+  color: white;
+}
+
+.disconnected {
+  background-color: #f44336; /* Red */
+  color: white;
+}
+
+#chat-box {
+  height: 300px;
+  border: 1px solid #ccc;
+  background: #fff;
+  overflow-y: scroll;
+  padding: 10px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column; /* Ensure messages stack vertically */
+  gap: 10px; /* Add space between messages */
+}
+
+form {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+input {
+  padding: 10px;
+  width: 75%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+button {
+  padding: 10px 20px;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #45a049;
+}
+
+/* User message style (right-aligned) */
+.user-message {
+  background-color: #d4edda; /* Light Green */
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  max-width: 70%;
+  display: inline-block;
+  font-size: 14px;
+  word-wrap: break-word;
+  align-self: flex-end; /* Align user messages to the right */
+}
+
+/* Other user's message style (left-aligned) */
+.other-user-message {
+  background-color: #e9ecef; /* Light Gray */
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  max-width: 70%;
+  display: inline-block;
+  font-size: 14px;
+  word-wrap: break-word;
+  align-self: flex-start; /* Align other users' messages to the left */
+}
+
+/* Server message style (center-aligned) */
+.server-message {
+  background-color: #f0f8ff; /* Light Blue */
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  max-width: 70%;
+  display: inline-block;
+  font-size: 14px;
+  word-wrap: break-word;
+  align-self: center; /* Center-align server messages */
+}
+
+/* General message container */
+.message-container {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start; /* Align items in a row */
+}
