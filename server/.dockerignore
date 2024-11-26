@@ -1,0 +1,28 @@
+# Ignore node_modules if you use Node.js for frontend (for example with npm or yarn)
+
+node_modules/
+
+# Ignore build or output directories (e.g., for frontend build tools)
+
+dist/
+build/
+
+# Ignore IDE configuration files
+
+.idea/
+.vscode/
+
+# Ignore OS-specific files (macOS, Windows)
+
+.DS_Store
+Thumbs.db
+
+# Ignore Dockerfile and docker-compose.yml (if not necessary)
+
+Dockerfile
+docker-compose.yml
+
+# Ignore .git directory and other version control metadata
+
+.git/
+.gitignore
