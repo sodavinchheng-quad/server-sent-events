@@ -120,6 +120,18 @@ app.get("/events/:storeId", (req, res) => {
   });
 });
 
+// get number of clients for each store
+app.get("/check_status", (req, res) => {
+  res.json(
+    Object.entries(storeClients).map((store) => {
+      return {
+        store_id: store[0],
+        number_of_clients: store[1].length,
+      };
+    })
+  );
+});
+
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
