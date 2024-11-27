@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict
-from contextlib import suppress
 import json
 import asyncio
 
@@ -45,6 +44,14 @@ periodic_tasks: Dict[int, asyncio.Task] = {}
 @app.get("/stores")
 def get_stores():
     return stores
+
+
+@app.get("/check_status")
+def check_status():
+    return {
+        "store_clients": {store_id: len(clients) for store_id, clients in store_clients.items()},
+        "periodic_tasks": list(periodic_tasks.keys()),
+    }
 
 
 # Get tables for a specific store
@@ -103,7 +110,9 @@ async def sse_events(store_id: int):
                 yield f"data: {message}\n\n"
         except asyncio.CancelledError:
             store_clients[store_id].remove(client_queue)
-            raise
+            # if no more clients, cancel the periodic task
+            if not store_clients[store_id]:
+                periodic_tasks[store_id].cancel()
 
     # Start the periodic task if not already running
     if store_id not in periodic_tasks:
@@ -126,10 +135,9 @@ async def periodic_status_update(store_id: int):
         del periodic_tasks[store_id]  # Cleanup when task is canceled
 
 
-@app.on_event("shutdown")
 async def cleanup():
     # Cancel all periodic tasks on shutdown
-    for task in periodic_tasks.values():
+    for task in list(periodic_tasks.values()):
         task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+
+app.add_event_handler("shutdown", cleanup)
