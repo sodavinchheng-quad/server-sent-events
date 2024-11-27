@@ -7,9 +7,18 @@ const tableStatusSelect = document.getElementById("table-status-select");
 const connectionStatusElem = document.getElementById("connection-status");
 const selectedStoreElem = document.getElementById("selected-store");
 
+let apiUrl = "";
+
+// Load environment variables from env.json
+async function loadEnv() {
+  const response = await fetch("env.json");
+  const env = await response.json();
+  apiUrl = env.API_URL;
+}
+
 // Load stores and display them as cards
 async function loadStores() {
-  const response = await fetch("http://localhost:8000/stores");
+  const response = await fetch(`${apiUrl}/stores`);
   const stores = await response.json();
   stores.forEach((store) => {
     const storeCard = document.createElement("div");
@@ -23,9 +32,7 @@ async function loadStores() {
 // Select a store and load its table data
 async function selectStore(storeId) {
   selectedStore = storeId;
-  const response = await fetch(
-    `http://localhost:8000/stores/${storeId}/tables`
-  );
+  const response = await fetch(`${apiUrl}/stores/${storeId}/tables`);
   const tables = await response.json();
 
   // Show table status section
@@ -57,9 +64,7 @@ async function selectStore(storeId) {
 
 // Connect to SSE for real-time updates
 function connectSSE(storeId) {
-  const eventSource = new EventSource(
-    `http://localhost:8000/events/${storeId}`
-  );
+  const eventSource = new EventSource(`${apiUrl}/events/${storeId}`);
 
   // On receiving an SSE event (table status update)
   eventSource.onmessage = function (event) {
@@ -86,6 +91,8 @@ function connectSSE(storeId) {
     if (data.message) {
       // Display the message in a popup (you can use a modal for a more styled popup)
       showPopup(data.message);
+    } else {
+      updateTableList(data);
     }
   };
 }
@@ -117,16 +124,13 @@ function updateTableStatus(tableId) {
   }
 
   // Send update request to the server for the specific table and store
-  fetch(
-    `http://localhost:8000/stores/${selectedStore}/tables/${tableId}/update`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ status: newStatus }),
-    }
-  )
+  fetch(`${apiUrl}/stores/${selectedStore}/tables/${tableId}/update`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: newStatus }),
+  })
     .then((response) => {
       if (response.ok) {
         console.log("Table status updated successfully");
@@ -140,7 +144,9 @@ function updateTableStatus(tableId) {
 }
 
 // Initialize the app
-loadStores();
+loadEnv().then(() => {
+  loadStores();
+});
 
 // Show a popup with the received message
 function showPopup(message) {

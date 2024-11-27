@@ -100,17 +100,24 @@ app.get("/events/:storeId", (req, res) => {
   // Add client to the store's client list for real-time updates
   storeClients[storeId].push(res);
 
+  // Function to send updated table statuses
+  function sendTableStatusUpdates() {
+    // Send updated data to client
+    res.write(`data: ${JSON.stringify(tables[storeId])}\n\n`);
+  }
+
+  // Send updated table statuses every minute
+  const intervalId = setInterval(sendTableStatusUpdates, 60000); // 60000ms = 1 minute
+
   // When the client disconnects, remove them from the store's client list
   req.on("close", () => {
+    clearInterval(intervalId);
     const index = storeClients[storeId].indexOf(res);
     if (index !== -1) {
       storeClients[storeId].splice(index, 1);
     }
+    res.end();
   });
-});
-
-app.get("/clients", (req, res) => {
-  res.json(storeClients[1].length);
 });
 
 app.listen(port, () => {
