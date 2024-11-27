@@ -1,66 +1,118 @@
 const express = require("express");
 const cors = require("cors");
-
 const app = express();
-const PORT = 8000;
+const port = 8000;
 
-// Enable CORS for all routes
+// Enable CORS
 app.use(cors());
 
-// Store connected clients (WebSocket-like functionality with SSE)
-let clients = [];
+// Mock store and table data
+const stores = [
+  { id: 1, name: "Store A", location: "Location A" },
+  { id: 2, name: "Store B", location: "Location B" },
+];
 
-// Endpoint for sending messages
-app.use(express.json());
+const tables = {
+  1: [
+    { id: 1, store_name: "Store A", status: "available" },
+    { id: 2, store_name: "Store A", status: "reserved" },
+  ],
+  2: [
+    { id: 1, store_name: "Store B", status: "occupied" },
+    { id: 2, store_name: "Store B", status: "available" },
+  ],
+};
 
-// Send a message to all clients except the sender
-app.post("/send_message", (req, res) => {
-  const { username, message } = req.body;
+// Store clients (this will be used to broadcast messages)
+const storeClients = {
+  1: [],
+  2: [],
+};
 
-  // Broadcast message to all connected clients except the sender
-  clients.forEach((client) => {
-    if (client.username !== username) {
-      client.res.write(`data: ${username}: ${message}\n\n`);
-    }
-  });
-
-  res.status(200).send("Message sent");
+// Get stores
+app.get("/stores", (req, res) => {
+  res.json(stores);
 });
 
-// SSE endpoint for broadcasting messages to clients
-app.get("/chat", (req, res) => {
+// Get tables for a specific store
+app.get("/stores/:storeId/tables", (req, res) => {
+  const storeId = req.params.storeId;
+  res.json(tables[storeId]);
+});
+
+// Update table status for a specific table in a specific store
+app.post(
+  "/stores/:storeId/tables/:tableId/update",
+  express.json(),
+  (req, res) => {
+    const storeId = req.params.storeId;
+    const tableId = req.params.tableId;
+    const { status } = req.body;
+
+    // Check if the store and table exist
+    if (!tables[storeId]) {
+      return res.status(404).send("Store not found");
+    }
+
+    const table = tables[storeId].find(
+      (table) => table.id === parseInt(tableId)
+    );
+
+    if (!table) {
+      return res.status(404).send("Table not found");
+    }
+
+    // Update the status of the specific table
+    table.status = status;
+
+    // Send the updated table data back
+    res.status(200).send("Status updated");
+  }
+);
+
+// Send a message to all clients connected to a specific store via SSE
+app.post("/stores/:storeId/push-message", express.json(), (req, res) => {
+  const storeId = req.params.storeId;
+  const { message } = req.body;
+
+  // Check if the store exists
+  if (!stores.find((store) => store.id === parseInt(storeId))) {
+    return res.status(404).send("Store not found");
+  }
+
+  // Send the message to all clients connected to this store
+  storeClients[storeId].forEach((client) => {
+    client.write(`data: ${JSON.stringify({ message })}\n\n`);
+  });
+
+  res.status(200).send("Message pushed");
+});
+
+// SSE for real-time updates (listening to store table status changes)
+app.get("/events/:storeId", (req, res) => {
+  const storeId = req.params.storeId;
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
-  // Add the client to the list
-  const username = req.query.username;
-  clients.push({ username, res });
+  // Add client to the store's client list for real-time updates
+  storeClients[storeId].push(res);
 
-  // Send the same message when a user joins or leaves the chat
-  const joinLeaveMessage = `${username} has joined the chat room.`;
-
-  // Notify other users about the new user
-  clients.forEach((client) => {
-    if (client.username !== username) {
-      client.res.write(`data: ${joinLeaveMessage}\n\n`);
-    }
-  });
-
-  // Notify the new user that they're connected
-  res.write(`data: ${joinLeaveMessage}\n\n`);
-
-  // Clean up when client disconnects
+  // When the client disconnects, remove them from the store's client list
   req.on("close", () => {
-    clients = clients.filter((client) => client.res !== res);
-    clients.forEach((client) => {
-      client.res.write(`data: ${username} has left the chat room.\n\n`);
-    });
+    const index = storeClients[storeId].indexOf(res);
+    if (index !== -1) {
+      storeClients[storeId].splice(index, 1);
+    }
   });
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+app.get("/clients", (req, res) => {
+  res.json(storeClients[1].length);
+});
+
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
 });
