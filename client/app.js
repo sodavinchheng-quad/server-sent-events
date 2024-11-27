@@ -66,12 +66,6 @@ async function selectStore(storeId) {
 function connectSSE(storeId) {
   const eventSource = new EventSource(`${apiUrl}/events/${storeId}`);
 
-  // On receiving an SSE event (table status update)
-  eventSource.onmessage = function (event) {
-    const updatedTables = JSON.parse(event.data);
-    updateTableList(updatedTables);
-  };
-
   // Handle SSE connection error
   eventSource.onerror = function () {
     connectionStatusElem.textContent = "Disconnected";
