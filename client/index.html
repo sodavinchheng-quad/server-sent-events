@@ -3,42 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chat App</title>
+    <title>Store Table Status</title>
+    <script
+      type="text/javascript"
+      nonce="7249ae47a97646728fe3a804eae"
+      src="//local.adguard.org?ts=1732670452154&amp;type=content-script&amp;dmn=storage.googleapis.com&amp;url=https%3A%2F%2Fstorage.googleapis.com%2Fserver-send-event-dev%2Findex.html&amp;app=com.apple.Safari&amp;css=3&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=1"
+    ></script>
+    <script
+      type="text/javascript"
+      nonce="7249ae47a97646728fe3a804eae"
+      src="//local.adguard.org?ts=1732670452154&amp;name=AdGuard%20Extra&amp;type=user-script"
+    ></script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <h1>Chat Room</h1>
-    <div id="connection-status" class="disconnected">Disconnected</div>
-
-    <!-- Section for entering username -->
-    <div id="username-section">
-      <h3>Enter Your Username</h3>
-      <form id="username-form" onsubmit="connectToChat(event)">
-        <input
-          type="text"
-          id="username"
-          placeholder="Enter your username"
-          required
-          autocomplete="off"
-        />
-        <button type="submit">Join Chat</button>
-      </form>
+    <!-- Connection Status -->
+    <div id="connection-status" class="status-indicator disconnected">
+      Disconnected
     </div>
 
-    <!-- Section for sending messages -->
-    <div id="message-section" style="display: none">
-      <h3>Welcome to the chat, <span id="username-display"></span></h3>
-      <div id="chat-box"></div>
-      <form id="message-form" onsubmit="sendMessage(event)">
-        <input
-          type="text"
-          id="message"
-          placeholder="Type a message"
-          required
-          autocomplete="off"
-        />
-        <button type="submit">Send</button>
-      </form>
+    <!-- Store Selection -->
+    <div id="store-selection" class="store-selection-container">
+      <h1>Select a Store</h1>
+      <div id="store-list" class="store-list"></div>
+    </div>
+
+    <!-- Table Status Section -->
+    <div id="table-status" class="table-status-container" style="display: none">
+      <div class="store-info">
+        <h2 id="selected-store">Selected Store: None</h2>
+      </div>
+      <div id="table-list" class="table-list"></div>
+      <div class="update-status">
+        <label for="table-status-select">Change Status: </label>
+        <select id="table-status-select">
+          <option value="available">Available</option>
+          <option value="reserved">Reserved</option>
+          <option value="occupied">Occupied</option>
+        </select>
+      </div>
     </div>
 
     <script src="app.js"></script>

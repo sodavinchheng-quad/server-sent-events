@@ -1,82 +1,165 @@
-let username = "";
-let eventSource;
-let chatBox = document.getElementById("chat-box");
-let connectionStatus = document.getElementById("connection-status");
+let selectedStore = null;
+const storeSelectionDiv = document.getElementById("store-selection");
+const tableStatusDiv = document.getElementById("table-status");
+const storeListElem = document.getElementById("store-list");
+const tableListElem = document.getElementById("table-list");
+const tableStatusSelect = document.getElementById("table-status-select");
+const connectionStatusElem = document.getElementById("connection-status");
+const selectedStoreElem = document.getElementById("selected-store");
 
-function connectToChat(event) {
-  event.preventDefault(); // Prevent form submission from reloading the page
-  username = document.getElementById("username").value.trim();
-  if (username === "") {
-    alert("Please enter a username");
-    return;
-  }
+let apiUrl = "";
 
-  // Show chat interface
-  document.getElementById("username-section").style.display = "none";
-  document.getElementById("message-section").style.display = "block";
-  document.getElementById("username-display").textContent = username;
+// Load environment variables from env.json
+async function loadEnv() {
+  const response = await fetch("env.json");
+  const env = await response.json();
+  apiUrl = env.API_URL;
+}
 
-  // Change connection status to "connecting"
-  connectionStatus.className = "disconnected";
-  connectionStatus.innerText = "Connecting...";
+// Load stores and display them as cards
+async function loadStores() {
+  const response = await fetch(`${apiUrl}/stores`);
+  const stores = await response.json();
+  stores.forEach((store) => {
+    const storeCard = document.createElement("div");
+    storeCard.classList.add("store-card");
+    storeCard.innerHTML = `<h3>${store.name}</h3><p>${store.location}</p>`;
+    storeCard.addEventListener("click", () => selectStore(store.id));
+    storeListElem.appendChild(storeCard);
+  });
+}
 
-  // Connect to the chat server via SSE
-  eventSource = new EventSource(
-    `http://127.0.0.1:8000/chat?username=${username}`
-  );
+// Select a store and load its table data
+async function selectStore(storeId) {
+  selectedStore = storeId;
+  const response = await fetch(`${apiUrl}/stores/${storeId}/tables`);
+  const tables = await response.json();
 
-  eventSource.onmessage = function (event) {
-    const message = event.data;
-    const messageElement = document.createElement("div");
+  // Show table status section
+  storeSelectionDiv.style.display = "none";
+  tableStatusDiv.style.display = "block";
 
-    // Check if the message is a server message (i.e., a user joins or leaves the chat)
-    if (
-      message.includes("has joined the chat room") ||
-      message.includes("has left the chat room")
-    ) {
-      messageElement.classList.add("server-message");
-    } else if (message.includes(username)) {
-      messageElement.classList.add("user-message");
-    } else {
-      messageElement.classList.add("other-user-message");
-    }
+  // Update the selected store indicator
+  selectedStoreElem.textContent = `Selected Store: ${
+    tables.length > 0 ? tables[0].store_name : "Unknown Store"
+  }`;
 
-    messageElement.classList.add("message-container");
-    messageElement.innerHTML = message;
-    chatBox.appendChild(messageElement);
-    chatBox.scrollTop = chatBox.scrollHeight;
-  };
+  // Display tables
+  tableListElem.innerHTML = ""; // Clear previous table list
+  tables.forEach((table) => {
+    const tableItem = document.createElement("div");
+    tableItem.classList.add("table-item", table.status); // Set initial status class
+    tableItem.dataset.tableId = table.id;
+    tableItem.innerHTML = `
+      <p>Table ${table.id}</p>
+      <span class="status">${table.status}</span>
+    `;
+    tableItem.addEventListener("click", () => updateTableStatus(table.id));
+    tableListElem.appendChild(tableItem);
+  });
 
+  // Connect to SSE for real-time updates
+  connectSSE(storeId);
+}
+
+// Connect to SSE for real-time updates
+function connectSSE(storeId) {
+  const eventSource = new EventSource(`${apiUrl}/events/${storeId}`);
+
+  // Handle SSE connection error
   eventSource.onerror = function () {
-    connectionStatus.className = "disconnected";
-    connectionStatus.innerText = "Disconnected. Reconnecting...";
+    connectionStatusElem.textContent = "Disconnected";
+    connectionStatusElem.classList.replace("connected", "disconnected");
   };
 
-  // Set status to connected once the SSE connection is established
+  // When the connection opens, update status to connected
   eventSource.onopen = function () {
-    connectionStatus.className = "connected";
-    connectionStatus.innerText = "Connected as " + username;
+    connectionStatusElem.textContent = "Connected";
+    connectionStatusElem.classList.replace("disconnected", "connected");
+  };
+
+  // Listen for messages
+  eventSource.onmessage = function (event) {
+    const data = JSON.parse(event.data);
+
+    if (data.message) {
+      // Display the message in a popup (you can use a modal for a more styled popup)
+      showPopup(data.message);
+    } else {
+      updateTableList(data);
+    }
   };
 }
 
-function sendMessage(event) {
-  event.preventDefault(); // Prevent form submission from reloading the page
-  const message = document.getElementById("message").value.trim();
-  if (message === "") return;
+// Update table statuses in real-time when the event is received
+function updateTableList(tables) {
+  // Iterate over the tables and update the corresponding elements
+  tables.forEach((table) => {
+    const tableElement = document.querySelector(
+      `.table-item[data-table-id="${table.id}"]`
+    );
+    if (tableElement) {
+      // Update the table status and apply the correct class
+      const statusElement = tableElement.querySelector(".status");
+      tableElement.classList.remove("available", "reserved", "occupied");
+      tableElement.classList.add(table.status);
+      statusElement.textContent = table.status;
+    }
+  });
+}
 
-  fetch("http://127.0.0.1:8000/send_message", {
+// Handle table status change from the select dropdown
+function updateTableStatus(tableId) {
+  const newStatus = tableStatusSelect.value;
+
+  if (!selectedStore) {
+    alert("No store selected!");
+    return;
+  }
+
+  // Send update request to the server for the specific table and store
+  fetch(`${apiUrl}/stores/${selectedStore}/tables/${tableId}/update`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ username, message }),
-  });
+    body: JSON.stringify({ status: newStatus }),
+  })
+    .then((response) => {
+      if (response.ok) {
+        console.log("Table status updated successfully");
+      } else {
+        console.error("Error updating table status");
+      }
+    })
+    .catch((error) => {
+      console.error("Error updating status:", error);
+    });
+}
 
-  // Display the message locally for immediate feedback (user message)
-  const messageElement = document.createElement("div");
-  messageElement.classList.add("user-message", "message-container");
-  messageElement.innerHTML = `<strong>${username}:</strong> ${message}`;
-  chatBox.appendChild(messageElement);
-  chatBox.scrollTop = chatBox.scrollHeight;
-  document.getElementById("message").value = "";
+// Initialize the app
+loadEnv().then(() => {
+  loadStores();
+});
+
+// Show a popup with the received message
+function showPopup(message) {
+  // Create a simple popup or modal
+  const popup = document.createElement("div");
+  popup.classList.add("popup");
+  popup.innerHTML = `
+    <div class="popup-content">
+      <p>${message}</p>
+      <button onclick="closePopup()">Close</button>
+    </div>
+  `;
+  document.body.appendChild(popup);
+}
+
+// Close the popup
+function closePopup() {
+  const popup = document.querySelector(".popup");
+  if (popup) {
+    popup.remove();
+  }
 }

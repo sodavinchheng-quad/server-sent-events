@@ -1,8 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Dict
+from contextlib import suppress
+import json
 import asyncio
-from typing import List
 
 app = FastAPI()
 
@@ -15,82 +17,119 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Dictionary to keep track of all connected clients (each client is identified by their username)
-# List of dictionaries with username and corresponding queue
-clients: List[dict] = []
+# Mock store and table data
+stores = [
+    {"id": 1, "name": "Store A", "location": "Location A"},
+    {"id": 2, "name": "Store B", "location": "Location B"},
+]
+
+tables = {
+    1: [
+        {"id": 1, "store_name": "Store A", "status": "available"},
+        {"id": 2, "store_name": "Store A", "status": "reserved"},
+    ],
+    2: [
+        {"id": 1, "store_name": "Store B", "status": "occupied"},
+        {"id": 2, "store_name": "Store B", "status": "available"},
+    ],
+}
+
+# Store clients (to broadcast messages)
+store_clients: Dict[int, List[asyncio.Queue]] = {1: [], 2: []}
+
+# Periodic tasks
+periodic_tasks: Dict[int, asyncio.Task] = {}
 
 
-@app.get("/chat")
-async def chat(request: Request, username: str):
-    """
-    Endpoint for SSE. Each client connects to this endpoint and receives messages in real-time.
-    """
-    # Create a queue for each connected client
-    queue = asyncio.Queue()
+# Get stores
+@app.get("/stores")
+def get_stores():
+    return stores
 
-    # Add the queue and username to the list of clients
-    clients.append({"username": username, "queue": queue})
 
-    # Inform the other clients about the new connection
-    await broadcast_message(f"data: {username} has joined the chat room!\n\n")
+# Get tables for a specific store
+@app.get("/stores/{store_id}/tables")
+def get_tables(store_id: int):
+    if store_id not in tables:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return tables[store_id]
+
+
+# Update table status for a specific table in a specific store
+@app.post("/stores/{store_id}/tables/{table_id}/update")
+async def update_table_status(store_id: int, table_id: int, request: Request):
+    data: Dict = await request.json()
+    status = data.get("status")
+
+    if store_id not in tables:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    table = next((t for t in tables[store_id] if t["id"] == table_id), None)
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    table["status"] = status
+    return {"message": "Status updated"}
+
+
+# Send a message to all clients connected to a specific store via SSE
+@app.post("/stores/{store_id}/push-message")
+async def push_message(store_id: int, request: Request):
+    data: Dict = await request.json()
+    message = data.get("message")
+
+    if not any(store["id"] == store_id for store in stores):
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    for client in store_clients[store_id]:
+        await client.put(json.dumps({"message": message}))
+
+    return {"message": "Message pushed"}
+
+
+# SSE for real-time updates (listening to store table status changes)
+@app.get("/events/{store_id}")
+async def sse_events(store_id: int):
+    if store_id not in store_clients:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    client_queue = asyncio.Queue()
+    store_clients[store_id].append(client_queue)
 
     async def event_stream():
         try:
             while True:
-                message = await queue.get()  # Wait for a new message
-                yield message  # Send it to the client
+                message = await client_queue.get()
+                yield f"data: {message}\n\n"
         except asyncio.CancelledError:
-            # When the connection is closed (user disconnects), we remove the client from the list
-            clients.remove({"username": username, "queue": queue})
-            await broadcast_message(f"data: {username} has left the chat room.\n\n")
+            store_clients[store_id].remove(client_queue)
+            raise
+
+    # Start the periodic task if not already running
+    if store_id not in periodic_tasks:
+        periodic_tasks[store_id] = asyncio.create_task(
+            periodic_status_update(store_id))
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.post("/send_message")
-async def send_message(request: Request):
-    """
-    Endpoint to send a message to all connected clients, excluding the sender.
-    """
-    data = await request.json()
-    username = data.get("username")
-    message = data.get("message")
-
-    if not username or not message:
-        return {"error": "Username and message are required."}
-
-    # Create a message to broadcast
-    broadcast_message = f"data: {username}: {message}\n\n"
-
-    # Broadcast the message to all connected clients, excluding the sender
-    for client in clients:
-        if client["username"] != username:
-            # Push the message into each client's queue
-            await client["queue"].put(broadcast_message)
-
-    return {"message": "Message sent to all clients (excluding the sender)."}
-
-
-async def broadcast_message(message: str):
-    """
-    Broadcast a message to all clients.
-    """
-    for client in clients:
-        # Push the message into each client's queue
-        await client["queue"].put(message)
-
-
-@app.get("/stream")
-async def stream(request: Request):
-    """
-    SSE stream that sends a 'ping' message to all clients every 5 seconds.
-    """
-    async def event_stream():
+# Periodic status update task
+async def periodic_status_update(store_id: int):
+    try:
         while True:
-            try:
-                await asyncio.sleep(5)
-                yield "data: ping\n\n"
-            except asyncio.CancelledError:
-                break
+            if store_clients[store_id]:  # Only run if there are active clients
+                data = json.dumps(tables[store_id])
+                for client in store_clients[store_id]:
+                    await client.put(data)
+            await asyncio.sleep(60)  # Send updates every 60 seconds
+    except asyncio.CancelledError:
+        del periodic_tasks[store_id]  # Cleanup when task is canceled
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.on_event("shutdown")
+async def cleanup():
+    # Cancel all periodic tasks on shutdown
+    for task in periodic_tasks.values():
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
