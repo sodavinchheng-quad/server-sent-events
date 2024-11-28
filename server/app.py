@@ -37,7 +37,11 @@ tables = {
 store_clients: Dict[int, List[asyncio.Queue]] = {1: [], 2: []}
 
 # Periodic tasks
-periodic_tasks: Dict[int, asyncio.Task] = {}
+periodic_task: asyncio.Task | None = None
+
+
+def get_total_client_count():
+    return sum(len(clients) for clients in store_clients.values())
 
 
 # Get stores
@@ -50,7 +54,7 @@ def get_stores():
 def check_status():
     return {
         "store_clients": {store_id: len(clients) for store_id, clients in store_clients.items()},
-        "periodic_tasks": list(periodic_tasks.keys()),
+        "periodic_task": periodic_task is not None,
     }
 
 
@@ -97,6 +101,8 @@ async def push_message(store_id: int, request: Request):
 # SSE for real-time updates (listening to store table status changes)
 @app.get("/events/{store_id}")
 async def sse_events(store_id: int):
+    global periodic_task
+
     if store_id not in store_clients:
         raise HTTPException(status_code=404, detail="Store not found")
 
@@ -104,6 +110,8 @@ async def sse_events(store_id: int):
     store_clients[store_id].append(client_queue)
 
     async def event_stream():
+        global periodic_task
+
         try:
             while True:
                 message = await client_queue.get()
@@ -111,33 +119,33 @@ async def sse_events(store_id: int):
         except asyncio.CancelledError:
             store_clients[store_id].remove(client_queue)
             # if no more clients, cancel the periodic task
-            if not store_clients[store_id]:
-                periodic_tasks[store_id].cancel()
+            if get_total_client_count() == 0:
+                cancel_periodic_task()
 
     # Start the periodic task if not already running
-    if store_id not in periodic_tasks:
-        periodic_tasks[store_id] = asyncio.create_task(
-            periodic_status_update(store_id))
+    if periodic_task is None:
+        periodic_task = asyncio.create_task(periodic_status_update())
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+def cancel_periodic_task():
+    global periodic_task
+    if periodic_task:
+        periodic_task.cancel()
+        periodic_task = None
+
+
 # Periodic status update task
-async def periodic_status_update(store_id: int):
+async def periodic_status_update():
     try:
         while True:
-            if store_clients[store_id]:  # Only run if there are active clients
-                data = json.dumps(tables[store_id])
-                for client in store_clients[store_id]:
-                    await client.put(data)
+            for store_id, clients in store_clients.items():
+                for client in clients:
+                    await client.put(json.dumps(tables[store_id]))
             await asyncio.sleep(60)  # Send updates every 60 seconds
     except asyncio.CancelledError:
-        del periodic_tasks[store_id]  # Cleanup when task is canceled
+        if get_total_client_count() == 0:
+            cancel_periodic_task()  # Cleanup when task is canceled
 
-
-async def cleanup():
-    # Cancel all periodic tasks on shutdown
-    for task in list(periodic_tasks.values()):
-        task.cancel()
-
-app.add_event_handler("shutdown", cleanup)
+app.add_event_handler("shutdown", cancel_periodic_task)
