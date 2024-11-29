@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List
-from constants import STORES
-from entities import Client
+from entities import Client, Store
+from gcs import get_store_table_data_from_gcs, get_stores_from_gcs
 import json
 import asyncio
 
@@ -22,20 +22,26 @@ app.root_path = "/api"
 
 store_clients: Dict[int, List[Client]] = {}
 
+stores = get_stores_from_gcs()
+STORES: Dict[int, Store] = {
+    store["id"]: Store(store["id"], store["name"]) for store in stores
+}
+
 
 # Get stores
 @app.get("/stores")
 def get_stores():
-    return [store.to_dict() for store in STORES.values()]
+    return stores
 
 
 # Get tables for a specific store
 @app.get("/stores/{store_id}/tables")
 def get_tables(store_id: int):
-    if store_id not in STORES:
+    try:
+        store_data = get_store_table_data_from_gcs(store_id)
+        return store_data
+    except Exception:
         raise HTTPException(status_code=404, detail="Store not found")
-
-    return [table.to_dict() for table in STORES[store_id].tables.values()]
 
 
 @app.get("/check_status")
@@ -48,28 +54,6 @@ def check_status():
         "total_clients": total_clients,
         "store_clients_count": store_clients_count,
     }
-
-
-# Update table status for a specific table in a specific store
-@app.post("/stores/{store_id}/tables/{table_id}/update")
-async def update_table_status(store_id: int, table_id: int, request: Request):
-    data: Dict = await request.json()
-    status = data.get("status")
-
-    if store_id not in STORES:
-        raise HTTPException(status_code=404, detail="Store not found")
-
-    store = STORES[store_id]
-    if table_id not in store.tables:
-        raise HTTPException(status_code=404, detail="Table not found")
-
-    table = store.tables[table_id]
-    try:
-        table.update_status(status)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid status")
-
-    return {"message": "Status updated"}
 
 
 # Send a message to all clients connected to a specific store via SSE
@@ -120,10 +104,8 @@ async def sse_events(store_id: int):
 async def periodic_status_update(client: Client, store_id: int):
     try:
         while True:
-            new_status = [
-                table.to_dict() for table in STORES[store_id].tables.values()
-            ]
-            await client.send(json.dumps(new_status))
+            store_data = get_store_table_data_from_gcs(store_id)
+            await client.send(json.dumps(store_data))
             await asyncio.sleep(10)  # Send updates every 10 seconds
     except asyncio.CancelledError:
         pass
