@@ -126,8 +126,7 @@ async def periodic_status_update(client: Client, store_id: int):
             await client.send(json.dumps(new_status))
             await asyncio.sleep(10)  # Send updates every 10 seconds
     except asyncio.CancelledError:
-        store_clients[store_id].remove(client)
-        client.cancel()
+        pass
 
 
 def cancel_tasks():

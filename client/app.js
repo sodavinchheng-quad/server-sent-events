@@ -136,9 +136,38 @@ storeSelect.addEventListener("change", (event) => {
   }
 });
 
+// Helper function to get query parameters
+function getQueryParams() {
+  const params = new URLSearchParams(window.location.search);
+  const storeId = params.get("store_id");
+  return storeId;
+}
+
+// Automatically select store based on query parameter
+async function checkForStoreInURL() {
+  const storeId = getQueryParams();
+  if (storeId) {
+    try {
+      // Ensure stores are loaded before checking
+      if (stores.length === 0) {
+        await fetchStores();
+      }
+      const store = stores.find((s) => s.id == storeId);
+      if (store) {
+        handleStoreSelection(store.id, store.name);
+      } else {
+        console.warn(`Store with ID ${storeId} not found.`);
+      }
+    } catch (error) {
+      console.error("Error checking URL for store:", error);
+    }
+  }
+}
+
 // Initialize the app
-loadEnv().then(() => {
-  fetchStores();
+loadEnv().then(async () => {
+  await fetchStores();
+  await checkForStoreInURL();
 });
 
 // Show a popup with the received message
