@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
+from typing import Dict, List
+from constants import STORES
+from entities import Client
 import json
 import asyncio
 
@@ -16,54 +18,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mock store and table data
-stores = [
-    {"id": 1, "name": "Store A", "location": "Location A"},
-    {"id": 2, "name": "Store B", "location": "Location B"},
-]
+app.root_path = "/api"
 
-tables = {
-    1: [
-        {"id": 1, "store_name": "Store A", "status": "available"},
-        {"id": 2, "store_name": "Store A", "status": "reserved"},
-    ],
-    2: [
-        {"id": 1, "store_name": "Store B", "status": "occupied"},
-        {"id": 2, "store_name": "Store B", "status": "available"},
-    ],
-}
-
-# Store clients (to broadcast messages)
-store_clients: Dict[int, List[asyncio.Queue]] = {1: [], 2: []}
-
-# Periodic tasks
-periodic_task: asyncio.Task | None = None
-
-
-def get_total_client_count():
-    return sum(len(clients) for clients in store_clients.values())
+store_clients: Dict[int, List[Client]] = {}
 
 
 # Get stores
 @app.get("/stores")
 def get_stores():
-    return stores
-
-
-@app.get("/check_status")
-def check_status():
-    return {
-        "store_clients": {store_id: len(clients) for store_id, clients in store_clients.items()},
-        "periodic_task": periodic_task is not None,
-    }
+    return [store.to_dict() for store in STORES.values()]
 
 
 # Get tables for a specific store
 @app.get("/stores/{store_id}/tables")
 def get_tables(store_id: int):
-    if store_id not in tables:
+    if store_id not in STORES:
         raise HTTPException(status_code=404, detail="Store not found")
-    return tables[store_id]
+
+    return [table.to_dict() for table in STORES[store_id].tables.values()]
+
+
+@app.get("/check_status")
+def check_status():
+    store_clients_count = {
+        store_id: len(clients) for store_id, clients in store_clients.items()
+    }
+    total_clients = sum(store_clients_count.values())
+    return {
+        "total_clients": total_clients,
+        "store_clients_count": store_clients_count,
+    }
 
 
 # Update table status for a specific table in a specific store
@@ -72,80 +56,84 @@ async def update_table_status(store_id: int, table_id: int, request: Request):
     data: Dict = await request.json()
     status = data.get("status")
 
-    if store_id not in tables:
+    if store_id not in STORES:
         raise HTTPException(status_code=404, detail="Store not found")
 
-    table = next((t for t in tables[store_id] if t["id"] == table_id), None)
-    if not table:
+    store = STORES[store_id]
+    if table_id not in store.tables:
         raise HTTPException(status_code=404, detail="Table not found")
 
-    table["status"] = status
+    table = store.tables[table_id]
+    try:
+        table.update_status(status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
     return {"message": "Status updated"}
 
 
 # Send a message to all clients connected to a specific store via SSE
-@app.post("/stores/{store_id}/push-message")
+@app.post("/stores/{store_id}/push_message")
 async def push_message(store_id: int, request: Request):
     data: Dict = await request.json()
     message = data.get("message")
 
-    if not any(store["id"] == store_id for store in stores):
+    if store_id not in STORES:
         raise HTTPException(status_code=404, detail="Store not found")
 
-    for client in store_clients[store_id]:
-        await client.put(json.dumps({"message": message}))
+    clients = store_clients.get(store_id)
 
-    return {"message": "Message pushed"}
+    for client in clients:
+        await client.send(json.dumps({"message": message}))
+
+    return {"message": f"Message pushed to {len(clients)} clients"}
 
 
 # SSE for real-time updates (listening to store table status changes)
 @app.get("/events/{store_id}")
 async def sse_events(store_id: int):
-    global periodic_task
-
-    if store_id not in store_clients:
+    if store_id not in STORES:
         raise HTTPException(status_code=404, detail="Store not found")
 
-    client_queue = asyncio.Queue()
-    store_clients[store_id].append(client_queue)
+    client = Client(store=STORES[store_id])
+    store_clients.setdefault(store_id, []).append(client)
 
-    async def event_stream():
-        global periodic_task
+    task = asyncio.create_task(periodic_status_update(client, store_id))
+    client.set_task(task)
 
-        try:
-            while True:
-                message = await client_queue.get()
-                yield f"data: {message}\n\n"
-        except asyncio.CancelledError:
-            store_clients[store_id].remove(client_queue)
-            # if no more clients, cancel the periodic task
-            if get_total_client_count() == 0:
-                cancel_periodic_task()
+    def on_cancel():
+        store_clients[store_id].remove(client)
+        client.cancel()
 
-    # Start the periodic task if not already running
-    if periodic_task is None:
-        periodic_task = asyncio.create_task(periodic_status_update())
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-def cancel_periodic_task():
-    global periodic_task
-    if periodic_task:
-        periodic_task.cancel()
-        periodic_task = None
+    return StreamingResponse(
+        client.listen(on_cancel),
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+        },
+        media_type="text/event-stream",
+    )
 
 
 # Periodic status update task
-async def periodic_status_update():
+async def periodic_status_update(client: Client, store_id: int):
     try:
         while True:
-            for store_id, clients in store_clients.items():
-                for client in clients:
-                    await client.put(json.dumps(tables[store_id]))
-            await asyncio.sleep(60)  # Send updates every 60 seconds
+            new_status = [
+                table.to_dict() for table in STORES[store_id].tables.values()
+            ]
+            await client.send(json.dumps(new_status))
+            await asyncio.sleep(10)  # Send updates every 10 seconds
     except asyncio.CancelledError:
-        if get_total_client_count() == 0:
-            cancel_periodic_task()  # Cleanup when task is canceled
+        store_clients[store_id].remove(client)
+        client.cancel()
 
-app.add_event_handler("shutdown", cancel_periodic_task)
+
+def cancel_tasks():
+    for clients in store_clients.values():
+        for client in clients:
+            client.cancel()
+
+
+app.add_event_handler("shutdown", cancel_tasks)

@@ -1,70 +1,86 @@
-let selectedStore = null;
-const storeSelectionDiv = document.getElementById("store-selection");
-const tableStatusDiv = document.getElementById("table-status");
-const storeListElem = document.getElementById("store-list");
-const tableListElem = document.getElementById("table-list");
-const tableStatusSelect = document.getElementById("table-status-select");
-const connectionStatusElem = document.getElementById("connection-status");
-const selectedStoreElem = document.getElementById("selected-store");
-
 let apiUrl = "";
+let eventSource = null; // Will hold the EventSource instance
 
 // Load environment variables from env.json
 async function loadEnv() {
-  const response = await fetch("env.json");
+  const response = await fetch(apiUrl + "env.json");
   const env = await response.json();
   apiUrl = env.API_URL;
 }
 
-// Load stores and display them as cards
-async function loadStores() {
-  const response = await fetch(`${apiUrl}/stores`);
-  const stores = await response.json();
+// DOM Elements
+const storeSearch = document.getElementById("store-search");
+const storeSelect = document.getElementById("store-select");
+const tableBody = document.getElementById("table-body");
+const connectionStatusElem = document.getElementById("connection-status");
+const selectedStoreDiv = document.getElementById("selected-store");
+const storeNameSpan = document.getElementById("store-name");
+const changeStoreButton = document.getElementById("change-store");
+
+// API Endpoints
+const storesApi = "/api/stores"; // Replace with your actual API
+const tableStatusApi = (storeId) => `/api/stores/${storeId}/tables`; // Replace with your actual API
+
+let stores = []; // Will hold the fetched stores
+
+// Fetch and populate stores
+async function fetchStores() {
+  try {
+    const response = await fetch(apiUrl + storesApi);
+    stores = await response.json();
+    populateStoreDropdown(stores);
+  } catch (error) {
+    console.error("Error fetching stores:", error);
+  }
+}
+
+// Populate store dropdown
+function populateStoreDropdown(stores) {
+  storeSelect.innerHTML = ""; // Clear existing options
   stores.forEach((store) => {
-    const storeCard = document.createElement("div");
-    storeCard.classList.add("store-card");
-    storeCard.innerHTML = `<h3>${store.name}</h3><p>${store.location}</p>`;
-    storeCard.addEventListener("click", () => selectStore(store.id));
-    storeListElem.appendChild(storeCard);
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name;
+    storeSelect.appendChild(option);
   });
 }
 
-// Select a store and load its table data
-async function selectStore(storeId) {
-  selectedStore = storeId;
-  const response = await fetch(`${apiUrl}/stores/${storeId}/tables`);
-  const tables = await response.json();
+// Filter stores based on search input
+storeSearch.addEventListener("input", (event) => {
+  const keyword = event.target.value.toLowerCase();
+  const filteredStores = stores.filter((store) =>
+    store.name.toLowerCase().includes(keyword)
+  );
+  populateStoreDropdown(filteredStores);
+});
 
-  // Show table status section
-  storeSelectionDiv.style.display = "none";
-  tableStatusDiv.style.display = "block";
+// Fetch and display table status
+async function fetchTableStatus(storeId) {
+  try {
+    const response = await fetch(apiUrl + tableStatusApi(storeId));
+    const tables = await response.json();
+    populateTableStatus(tables);
+  } catch (error) {
+    console.error("Error fetching table status:", error);
+  }
+}
 
-  // Update the selected store indicator
-  selectedStoreElem.textContent = `Selected Store: ${
-    tables.length > 0 ? tables[0].store_name : "Unknown Store"
-  }`;
-
-  // Display tables
-  tableListElem.innerHTML = ""; // Clear previous table list
+// Populate table status
+function populateTableStatus(tables) {
+  tableBody.innerHTML = ""; // Clear existing rows
   tables.forEach((table) => {
-    const tableItem = document.createElement("div");
-    tableItem.classList.add("table-item", table.status); // Set initial status class
-    tableItem.dataset.tableId = table.id;
-    tableItem.innerHTML = `
-      <p>Table ${table.id}</p>
-      <span class="status">${table.status}</span>
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${table.table_no}</td>
+      <td class="${table.status}">${table.status}</td>
     `;
-    tableItem.addEventListener("click", () => updateTableStatus(table.id));
-    tableListElem.appendChild(tableItem);
+    tableBody.appendChild(row);
   });
-
-  // Connect to SSE for real-time updates
-  connectSSE(storeId);
 }
 
-// Connect to SSE for real-time updates
-function connectSSE(storeId) {
-  const eventSource = new EventSource(`${apiUrl}/events/${storeId}`);
+// Set up Server-Sent Events
+function setupSSE(storeId) {
+  eventSource = new EventSource(apiUrl + `/api/events/${storeId}`);
 
   // Handle SSE connection error
   eventSource.onerror = function () {
@@ -79,67 +95,50 @@ function connectSSE(storeId) {
   };
 
   // Listen for messages
-  eventSource.onmessage = function (event) {
+  eventSource.onmessage = (event) => {
     const data = JSON.parse(event.data);
 
     if (data.message) {
       // Display the message in a popup (you can use a modal for a more styled popup)
       showPopup(data.message);
     } else {
-      updateTableList(data);
+      populateTableStatus(data);
     }
   };
 }
+// Hide store selection and show the selected store indicator
+function handleStoreSelection(storeId, storeName) {
+  document.querySelector(".dropdown").classList.add("hidden");
+  selectedStoreDiv.classList.remove("hidden");
+  storeNameSpan.textContent = storeName;
 
-// Update table statuses in real-time when the event is received
-function updateTableList(tables) {
-  // Iterate over the tables and update the corresponding elements
-  tables.forEach((table) => {
-    const tableElement = document.querySelector(
-      `.table-item[data-table-id="${table.id}"]`
-    );
-    if (tableElement) {
-      // Update the table status and apply the correct class
-      const statusElement = tableElement.querySelector(".status");
-      tableElement.classList.remove("available", "reserved", "occupied");
-      tableElement.classList.add(table.status);
-      statusElement.textContent = table.status;
-    }
-  });
+  // Fetch and display the table status
+  fetchTableStatus(storeId);
+  setupSSE(storeId);
 }
 
-// Handle table status change from the select dropdown
-function updateTableStatus(tableId) {
-  const newStatus = tableStatusSelect.value;
+// Show store selection again when changing the store
+changeStoreButton.addEventListener("click", () => {
+  document.querySelector(".dropdown").classList.remove("hidden");
+  selectedStoreDiv.classList.add("hidden");
+  tableBody.innerHTML = ""; // Clear table status
+  eventSource.close(); // Close the SSE connection
+  connectionStatusElem.textContent = "Disconnected";
+  connectionStatusElem.classList.replace("connected", "disconnected");
+  storeSelect.selectedIndex = -1; // Reset the selected store
+});
 
-  if (!selectedStore) {
-    alert("No store selected!");
-    return;
+// Modify the event listener for store selection
+storeSelect.addEventListener("change", (event) => {
+  const selectedOption = storeSelect.options[storeSelect.selectedIndex];
+  if (selectedOption) {
+    handleStoreSelection(selectedOption.value, selectedOption.textContent);
   }
-
-  // Send update request to the server for the specific table and store
-  fetch(`${apiUrl}/stores/${selectedStore}/tables/${tableId}/update`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ status: newStatus }),
-  })
-    .then((response) => {
-      if (response.ok) {
-        console.log("Table status updated successfully");
-      } else {
-        console.error("Error updating table status");
-      }
-    })
-    .catch((error) => {
-      console.error("Error updating status:", error);
-    });
-}
+});
 
 // Initialize the app
 loadEnv().then(() => {
-  loadStores();
+  fetchStores();
 });
 
 // Show a popup with the received message
